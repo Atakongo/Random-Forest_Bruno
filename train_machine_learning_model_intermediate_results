@@ -1,0 +1,165 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+import joblib
+from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix, f1_score
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import GridSearchCV
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+from xgboost import XGBClassifier
+
+
+# Define a parameter grid for logistic regression
+param_grid_logReg = {
+    'C': [0.001, 0.01, 0.1, 1, 10, 100],  # Regularization strength
+    'penalty': ['l1', 'l2', 'elasticnet', None],  # Regularization types
+    'solver': ['liblinear', 'saga'],  # Solvers that support all penalties
+    'max_iter': [100, 200, 500]  # Maximum number of iterations
+}
+
+# Define the parameter grid for rf_model
+param_grid_rf = {
+    'n_estimators': [300, 400, 500],
+    'max_depth': [None, 10, 20, 30],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'max_features': ['sqrt', 'log2']
+}
+
+# Define the parameter grid for xgboost
+param_grid_xgboost = {
+    'n_estimators': [100, 200, 300],
+    'max_depth': [3, 5, 7],
+    'learning_rate': [0.01, 0.1, 0.2],
+    'min_child_weight': [1, 3, 5],
+    'gamma': [0, 0.1, 0.2],
+    'subsample': [0.6, 0.8, 1.0],
+    'colsample_bytree': [0.6, 0.8, 1.0],
+    'reg_alpha': [0, 0.1, 1],
+    'reg_lambda': [1, 1.5, 2],
+}
+
+# Load the saved data
+df_train = pd.read_excel("cosine_similarity_GVL_train_feature_engineered.xlsx")
+df_val = pd.read_excel("cosine_similarity_GVL_validation_feature_engineered.xlsx")
+df_test = pd.read_excel("cosine_similarity_GVL_test_feature_engineered.xlsx")
+
+print("The task was started and the data was successfully loaded")
+
+# 'match' column is the renamed to 'label' as the target column
+X_train = df_train.drop(columns=["label"])
+y_train = df_train["label"]
+
+X_val = df_val.drop(columns=["label"])
+y_val = df_val["label"]
+
+X_test = df_test.drop(columns=["label"])
+y_test = df_test["label"]
+
+#handle missing values
+X_train = X_train.fillna(0)  # Replace NaN with 0 
+X_val = X_val.fillna(0)  # Replace NaN with 0 
+X_test = X_test.fillna(0)  # Replace NaN with 0 
+
+#normalize the data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_val_scaled = scaler.fit_transform(X_val)
+X_test_scaled = scaler.fit_transform(X_test)
+
+
+#Split the data
+#X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+
+# Initialize the model
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+#ada = AdaBoostClassifier(n_estimators=100, random_state=42) 
+#svm_model = SVC(kernel='rbf', C=1.0, gamma='scale')
+#log_reg = LogisticRegression(random_state=42)
+#xgb_model = XGBClassifier(random_state=42)
+
+# Train the modelss
+rf_model.fit(X_train_scaled, y_train)
+#ada.fit(X_train_scaled, y_train)
+#svm_model.fit(X_train_scaled, y_train)
+#xgb_model.fit(X_train_scaled, y_train)
+
+cv_scores = cross_val_score(rf_model, X_train_scaled, y_train, cv=10, scoring="precision") # cv was 10 but for xgboost 5 was tested
+print(f"Cross-validated Accuracy: {cv_scores.mean():.2f}")
+
+
+# Instantiate the grid search
+grid_search = GridSearchCV(
+    estimator=rf_model,
+    param_grid=param_grid_rf,
+    scoring='precision',  # Metric to optimize
+    cv=10,                # Number of cross-validation folds || was 10 but for xgboost 5 is tested
+    n_jobs=-1,            # Use all available cores
+    verbose=2             # Print progress
+)
+
+# Fit the model to the validation data
+grid_search.fit(X_val_scaled, y_val)
+
+# Best hyperparameters and precision
+print("Best Parameters:", grid_search.best_params_)
+print("Best Precision Score:", grid_search.best_score_)
+
+best_model = grid_search.best_estimator_
+validation_precision = best_model.score(X_val_scaled, y_val)
+print("Validation Precision:", validation_precision)
+
+# Predictions
+y_pred = best_model.predict(X_test_scaled)
+
+# Get misclassified indices
+misclassified_indices = (y_test != y_pred)
+# Convert X_test and y_test back to DataFrame for easier manipulation
+X_test_df = X_test.copy()  # Ensure you have the feature set
+y_test_df = pd.Series(y_test, index=X_test.index, name="true_label")  # Align indices
+
+# Add predicted labels to the DataFrame
+X_test_df["true_label"] = y_test_df
+X_test_df["predicted_label"] = y_pred
+
+# Filter for misclassified rows
+misclassified_data = X_test_df[misclassified_indices]
+misclassified_data.to_excel("misclassified_data.xlsx", index=False)
+
+
+# Metrics
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred)
+recall = recall_score(y_test, y_pred)
+f1Score = f1_score(y_test, y_pred)
+
+print(f"Accuracy: {accuracy:.2f}")
+print(f"Precision: {precision:.2f}")
+print(f"Recall: {recall:.2f}")
+print(f"F1 Score: {f1Score:.2f}")
+
+# Confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred)
+print("Confusion Matrix:\n", conf_matrix)
+
+import matplotlib.pyplot as plt
+
+# Get feature importance
+importances = best_model.feature_importances_
+feature_names = X_train.columns
+
+# Plot
+plt.figure(figsize=(10, 6))
+plt.barh(feature_names, importances)
+plt.xlabel("Feature Importance")
+plt.title("Feature Importance in Random Forest")
+plt.show()
+
+
+#joblib.dump(rf_model, "random_forest_model_GVL_trained.pkl")
